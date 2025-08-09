@@ -1,0 +1,346 @@
+{
+  "name": "rune-dsl-language-support",
+  "displayName": "Rune-DSL VSCode Language Plugin",
+  "description": "Community VS Code extension for Rune DSL (Rosetta) development - syntax highlighting, error checking, auto-completion. Complements Regnosys Rosetta platform.",
+  "version": "5.1.12",
+  "publisher": "nicholas-moger",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicholas-moger/Rune-DSL-VSCode-Plugin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nicholas-moger/Rune-DSL-VSCode-Plugin/issues"
+  },
+  "homepage": "https://github.com/nicholas-moger/Rune-DSL-VSCode-Plugin#readme",
+  "license": "Apache-2.0",
+  "keywords": [
+    "rosetta",
+    "rune-dsl",
+    "dsl",
+    "fintech",
+    "finos",
+    "regnosys",
+    "language-server",
+    "syntax-highlighting",
+    "code-generation",
+    "java",
+    "development-tool",
+    "community"
+  ],
+  "engines": {
+    "vscode": "^1.73.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "icon": "images/icon.png",
+  "activationEvents": [
+    "onLanguage:rosetta"
+  ],
+  "main": "out/extension",
+  "contributes": {
+    "configuration": {
+      "title": "Rune DSL",
+      "properties": {
+        "runeDsl.workspace.roots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Limit analysis to these folders or glob patterns (relative to the workspace). Example: [\"rosetta-src\", \"packages/*/models\"]. Leave empty to analyze the entire workspace."
+        },
+        "runeDsl.workspace.onlyOpenFiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, the language server only reacts to opened Rosetta files (no workspace file watching). Useful to reduce initial diagnostics on very large repos."
+        },
+        "runeDsl.workspace.excludeGlobs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Glob patterns to exclude from analysis (relative to the workspace). These are forwarded to the language server when supported."
+        },
+        "runeDsl.linting.enableDiagnostics": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable real-time error checking and diagnostics"
+        },
+        "runeDsl.linting.enableSemanticHighlighting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable advanced semantic syntax highlighting"
+        },
+        "runeDsl.linting.enableHover": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable hover information for symbols"
+        },
+        "runeDsl.linting.enableCompletion": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable auto-completion suggestions"
+        },
+        "runeDsl.linting.enableFormatting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable code formatting"
+        },
+        "runeDsl.linting.enableInlayHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inlay hints for type information"
+        },
+        "runeDsl.linting.enableCodeActions": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable quick fixes and refactoring suggestions"
+        },
+        "runeDsl.languageServer.traceLevel": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Set the trace level for language server communication"
+        },
+        "runeDsl.languageServer.javaOpts": {
+          "type": "string",
+          "default": "",
+          "description": "Additional JVM options for the language server (e.g., '-Xmx2g -Dprop=value')"
+        },
+        "runeDsl.languageServer.timeout": {
+          "type": "number",
+          "default": 30,
+          "description": "Timeout in seconds for language server startup"
+        },
+        "runeDsl.templates.basicTypesPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path to basic types template files (leave empty to use built-in)"
+        },
+        "runeDsl.startup.promptForBasicTypes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show startup prompt to copy basic types (annotations.rosetta, basictypes.rosetta) from GitHub. You can manually copy these later using commands if disabled."
+        },
+        "runeDsl.codeGeneration.enableJavaGeneration": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic Java code generation from Rosetta files"
+        },
+        "runeDsl.codeGeneration.outputPath": {
+          "type": "string",
+          "default": "src/generated",
+          "description": "Output directory for generated Java code (relative to workspace root)"
+        },
+        "runeDsl.startup.showCodeGenerationInfo": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show startup message about Java code generation settings. Disable if you don't need Java generation reminders."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "runeDsl.copyBasicTypes",
+        "title": "Copy Basic Rosetta Types to Workspace",
+        "category": "Rune DSL"
+      },
+      {
+        "command": "runeDsl.copyBasicTypesFromGitHub",
+        "title": "Copy Basic Rune DSL Types from GitHub",
+        "category": "Rune DSL"
+      },
+      {
+        "command": "runeDsl.openSettings",
+        "title": "Open Rune DSL Settings",
+        "category": "Rune DSL"
+      },
+      {
+        "command": "runeDsl.restartLanguageServer",
+        "title": "Restart Language Server",
+        "category": "Rune DSL"
+      },
+      {
+        "command": "runeDsl.toggleJavaGeneration",
+        "title": "Toggle Java Code Generation",
+        "category": "Rune DSL"
+      },
+      {
+        "command": "runeDsl.resetPromptStates",
+        "title": "Reset Startup Prompt States",
+        "category": "Rune DSL"
+      }
+    ],
+    "languages": [
+      {
+        "id": "rosetta",
+        "aliases": [
+          "Rosetta DSL",
+          "rosetta"
+        ],
+        "extensions": [
+          ".rosetta"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "rosetta",
+        "scopeName": "source.rosetta",
+        "path": "./syntaxes/rosetta.tmLanguage.json"
+      }
+    ],
+    "semanticTokenTypes": [
+      {
+        "id": "basicType",
+        "superType": "type",
+        "description": "A Rosetta basicType such as `string` and `number`."
+      },
+      {
+        "id": "recordType",
+        "superType": "type",
+        "description": "A Rosetta recordType such as `date`."
+      },
+      {
+        "id": "typeAlias",
+        "superType": "type",
+        "description": "A Rosetta typeAlias."
+      },
+      {
+        "id": "documentCorpus",
+        "description": "A reference to a corpus of a document."
+      },
+      {
+        "id": "metaMember",
+        "superType": "property",
+        "description": "A meta member of a type."
+      },
+      {
+        "id": "inlineParameter",
+        "superType": "parameter",
+        "description": "A parameter of an inline function."
+      },
+      {
+        "id": "output",
+        "superType": "parameter",
+        "description": "The output parameter of a function."
+      },
+      {
+        "id": "rule",
+        "description": "A reference to a rule."
+      },
+      {
+        "id": "implicitVariable",
+        "description": "The implicit variable (`item`)."
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "singleCardinality",
+        "description": "A symbol of single cardinality."
+      },
+      {
+        "id": "multiCardinality",
+        "description": "A symbol of multi cardinality."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "rosetta",
+        "scopes": {
+          "type": [
+            "entity.name.type.type.rosetta"
+          ],
+          "enum": [
+            "entity.name.type.enum.rosetta"
+          ],
+          "basicType": [
+            "entity.name.type.builtin.basic-type.rosetta"
+          ],
+          "recordType": [
+            "entity.name.type.builtin.record-type.rosetta"
+          ],
+          "qualifiedType": [
+            "entity.name.type.builtin.qualified-type.rosetta"
+          ],
+          "calculationType": [
+            "entity.name.type.builtin.calculation-type.rosetta"
+          ],
+          "documentCorpus": [
+            "entity.name.document.corpus.rosetta"
+          ],
+          "documentSegment": [
+            "entity.name.document.segment.rosetta"
+          ],
+          "property": [
+            "variable.other.member.rosetta"
+          ],
+          "metaMember": [
+            "variable.other.member.meta.rosetta"
+          ],
+          "enumMember": [
+            "variable.other.enummember.rosetta"
+          ],
+          "variable": [
+            "variable.other.alias.rosetta"
+          ],
+          "parameter": [
+            "variable.parameter.input.rosetta"
+          ],
+          "output": [
+            "variable.parameter.output.rosetta"
+          ],
+          "inlineParameter": [
+            "variable.parameter.inline.rosetta"
+          ],
+          "function": [
+            "entity.name.function.rosetta"
+          ],
+          "function.defaultLibrary": [
+            "entity.name.function.builtin.rosetta"
+          ],
+          "rule": [
+            "entity.name.rule.rosetta"
+          ],
+          "implicitVariable": [
+            "constant.language.rosetta"
+          ]
+        }
+      }
+    ]
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.73.1",
+    "shx": "^0.3.4",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0",
+    "vscode-jsonrpc": "^8.0.0"
+  },
+  "scripts": {
+    "copy-lsp": "shx cp -r ../target/languageserver src/rosetta",
+    "copy-text-mate": "shx cp -r ../src-gen/main/resources/syntaxes .",
+    "compile": "tsc",
+    "watch": "tsc -w",
+    "update-vscode": "node ./node_modules/vscode/bin/install",
+    "build": "npm run build-extension-ps && npm run compile",
+    "build-extension": "echo \"DEPRECATED: Use build-extension-ps for Windows PowerShell build\" && exit 1",
+    "build-extension-ps": "pwsh -ExecutionPolicy Bypass -File build-extension.ps1",
+    "build-vsix": "echo \"DEPRECATED: Use build-vsix-ps for Windows PowerShell build\" && exit 1",
+    "build-vsix-ps": "pwsh -ExecutionPolicy Bypass -File build-extension.ps1 -CreateVSIX",
+    "clean": "echo \"DEPRECATED: Use clean-ps for Windows PowerShell clean\" && exit 1",
+    "clean-ps": "pwsh -ExecutionPolicy Bypass -File build-extension.ps1 -CleanOnly",
+    "pretest": "npm run compile",
+    "test": "NODE_ENV=test ./node_modules/.bin/vscode-test-cli"
+  }
+}

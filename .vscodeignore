@@ -1,0 +1,14 @@
+.vscode/**
+.vscode-test/**
+.gitignore
+vsc-extension-quickstart.md
+build.ps1
+*.vsix
+tempExtract/**
+**/*.map
+.eslintrc.json
+.travis.yml
+.github/**
+src/**
+!src/rosetta/**
+!src/extension.ts

@@ -1,0 +1,4 @@
+This is a placeholder. Replace this with a 128x128 PNG icon.
+
+For the official release, you should create a proper icon using a graphic design tool
+and save it as a 128x128 PNG file.

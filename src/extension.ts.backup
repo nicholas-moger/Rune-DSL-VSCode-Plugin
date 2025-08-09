@@ -1,0 +1,509 @@
+/*
+ * Copyright 2024 REGnosys
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+'use strict';
+
+import * as path from 'path';
+import * as os from 'os';
+import * as fs from 'fs';
+
+import { Trace } from 'vscode-jsonrpc';
+import { commands, window, workspace, ExtensionContext, Uri, OutputChannel, StatusBarAlignment, StatusBarItem } from 'vscode';
+import { LanguageClient, LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
+
+let lc: LanguageClient;
+let outputChannel: OutputChannel;
+let statusBarItem: StatusBarItem;
+let isActivated = false;
+let commandDisposables: any[] = [];
+
+export async function activate(context: ExtensionContext) {
+    // Prevent multiple activations
+    if (isActivated) {
+        outputChannel?.appendLine('Extension already activated, skipping...');
+        return;
+    }
+    
+    try {
+        // Create output channel for extension logging
+        outputChannel = window.createOutputChannel('Rosetta Language Server');
+        context.subscriptions.push(outputChannel);
+        
+        // Create status bar item to show optimization profile
+        statusBarItem = window.createStatusBarItem(StatusBarAlignment.Right, 100);
+        statusBarItem.command = 'rosetta.performance.diagnostic';
+        context.subscriptions.push(statusBarItem);
+        
+        outputChannel.appendLine('Activating Rosetta Language Server extension...');
+      // Get user configuration for performance settings
+    const config = workspace.getConfiguration('rosetta');
+    const maxMemory = config.get<string>('server.maxMemory', '4g');
+    const maxConcurrentRequests = config.get<number>('server.maxConcurrentRequests', 4);
+    const resourceCacheSize = config.get<number>('server.resourceCacheSize', 1000);
+    const maxFileSize = config.get<number>('server.maxFileSize', 10485760);
+    const enableIncrementalBuild = config.get<boolean>('performance.enableIncrementalBuild', true);
+    const enableResourceCaching = config.get<boolean>('performance.enableResourceCaching', true);
+    const enableParallelBuilding = config.get<boolean>('performance.enableParallelBuilding', false);
+    const enableAsyncIndexing = config.get<boolean>('performance.enableAsyncIndexing', false);
+    const maxFilesPerProject = config.get<number>('performance.maxFilesPerProject', 5000);
+    const enableBatchProcessing = config.get<boolean>('performance.enableBatchProcessing', false);
+    const batchSize = config.get<number>('performance.batchSize', 50);
+    const enableLazyLoading = config.get<boolean>('performance.enableLazyLoading', true);
+    const optimizationProfile = config.get<string>('performance.optimizationProfile', 'optimized');
+    const enableFileWatching = config.get<boolean>('workspace.enableFileWatching', true);
+    const excludePatterns = config.get<string[]>('workspace.excludePatterns', ['**/node_modules/**', '**/target/**', '**/.git/**']);
+    
+    outputChannel.appendLine(`Performance settings:`);
+    outputChannel.appendLine(`  Memory: ${maxMemory}`);
+    outputChannel.appendLine(`  Concurrent Requests: ${maxConcurrentRequests}`);
+    outputChannel.appendLine(`  Cache Size: ${resourceCacheSize}`);
+    outputChannel.appendLine(`  Max File Size: ${maxFileSize} bytes`);
+    outputChannel.appendLine(`  Max Files Per Project: ${maxFilesPerProject}`);
+    outputChannel.appendLine(`  Optimization Profile: ${optimizationProfile}`);
+    outputChannel.appendLine(`  Parallel Building: ${enableParallelBuilding}`);
+    outputChannel.appendLine(`  Async Indexing: ${enableAsyncIndexing}`);
+    outputChannel.appendLine(`  Batch Processing: ${enableBatchProcessing} (size: ${batchSize})`);
+    outputChannel.appendLine(`  Lazy Loading: ${enableLazyLoading}`);
+    outputChannel.appendLine(`  File Watching: ${enableFileWatching}`);
+    outputChannel.appendLine(`  Exclude Patterns: ${excludePatterns.join(', ')}`);
+    
+    // Choose launcher based on optimization profile
+    let isDebugMode = process.env.VSCODE_DEBUG_MODE === "true";
+    let launcher: string;
+    
+    if (isDebugMode) {
+        launcher = 'rune-debug.bat';
+    } else {
+        switch (optimizationProfile) {
+            case 'ultra':
+                launcher = 'rune-dsl-ls-ultra.bat';
+                break;
+            case 'optimized':
+                launcher = 'rune-dsl-ls-optimized.bat';
+                break;
+            case 'standard':
+            default:
+                launcher = os.platform() === 'win32' ? 'rune-dsl-ls.bat' : 'rune-dsl-ls';
+                break;
+        }
+    }
+      if (os.platform() !== 'win32' && launcher.endsWith('.bat')) {
+        launcher = 'rune-dsl-ls'; // Fallback for non-Windows platforms
+    }
+    let script = context.asAbsolutePath(path.join('src', 'rosetta', 'bin', launcher));
+    
+    // Update status bar and show notification about launcher selection
+    const profileDisplayMap = {
+        'ultra': '🚀 Ultra',
+        'optimized': '⚡ Optimized', 
+        'standard': '📝 Standard'
+    };
+    const displayProfile = profileDisplayMap[optimizationProfile as keyof typeof profileDisplayMap] || '📝 Standard';
+    statusBarItem.text = `Rosetta: ${displayProfile}`;
+    statusBarItem.tooltip = `Rosetta Language Server - ${optimizationProfile} mode\nLauncher: ${launcher}\nClick for performance diagnostic`;
+    statusBarItem.show();
+    
+    // Log launcher selection prominently
+    outputChannel.appendLine('');
+    outputChannel.appendLine('================================================');
+    outputChannel.appendLine(`🚀 ROSETTA LANGUAGE SERVER STARTUP`);
+    outputChannel.appendLine(`   Profile: ${optimizationProfile.toUpperCase()}`);
+    outputChannel.appendLine(`   Launcher: ${launcher}`);
+    outputChannel.appendLine(`   Script Path: ${script}`);
+    outputChannel.appendLine(`   Debug Mode: ${isDebugMode ? 'ENABLED' : 'DISABLED'}`);
+    outputChannel.appendLine('================================================');
+    outputChannel.appendLine('');
+    
+    // Show notification to user about optimization profile
+    if (optimizationProfile === 'ultra') {
+        window.showInformationMessage(
+            `🚀 Rosetta Language Server started in ULTRA mode for large projects (${launcher})`,
+            'View Settings',
+            'Performance Guide'
+        ).then(selection => {
+            if (selection === 'View Settings') {
+                commands.executeCommand('workbench.action.openSettings', 'rosetta.performance');
+            } else if (selection === 'Performance Guide') {
+                const guide = Uri.file(context.asAbsolutePath('PERFORMANCE_GUIDE.md'));
+                commands.executeCommand('vscode.open', guide);
+            }
+        });
+    } else if (optimizationProfile === 'optimized') {
+        window.showInformationMessage(
+            `⚡ Rosetta Language Server started in OPTIMIZED mode (${launcher})`,
+            'View Settings'
+        ).then(selection => {
+            if (selection === 'View Settings') {
+                commands.executeCommand('workbench.action.openSettings', 'rosetta.performance');
+            }
+        });
+    }
+    
+    // Set the model directory path for basic types and annotations
+    // Use absolute paths to ensure the language server can find the model files
+    let modelDir = context.asAbsolutePath(path.join('src', 'rosetta', 'model')); 
+    let rootModelDir = context.asAbsolutePath('model');
+    
+    // Check if directories exist and log their contents
+    outputChannel.appendLine(`Model directory exists: ${fs.existsSync(modelDir)}`);
+    outputChannel.appendLine(`Root model directory exists: ${fs.existsSync(rootModelDir)}`);
+    
+    if (fs.existsSync(modelDir)) {
+        outputChannel.appendLine(`Model directory contents: ${fs.readdirSync(modelDir)}`);
+    }
+    
+    if (fs.existsSync(rootModelDir)) {
+        outputChannel.appendLine(`Root model directory contents: ${fs.readdirSync(rootModelDir)}`);
+    }
+    
+    // Verify source files exist before attempting to copy
+    const basicTypesSourceFile = path.join(modelDir, 'basictypes.rosetta');
+    const annotationsSourceFile = path.join(modelDir, 'annotations.rosetta');
+    
+    if (!fs.existsSync(basicTypesSourceFile)) {
+        const message = `Source file not found: ${basicTypesSourceFile}`;
+        outputChannel.appendLine(message);
+        window.showErrorMessage(`Rosetta Language Server: ${message}`);
+        return;
+    }
+    
+    if (!fs.existsSync(annotationsSourceFile)) {
+        const message = `Source file not found: ${annotationsSourceFile}`;
+        outputChannel.appendLine(message);
+        window.showErrorMessage(`Rosetta Language Server: ${message}`);
+        return;
+    }
+    
+    // Get all workspace folders
+    const workspaceFolders = workspace.workspaceFolders || [];
+    
+    if (workspaceFolders.length === 0) {
+        outputChannel.appendLine("No workspace folder found");
+        window.showInformationMessage("Rosetta Language Server: No workspace folder found. Basic types will be available when a folder is opened.");
+        // Continue without workspace setup, as user might open a folder later
+    }
+    
+    // Set up each workspace folder with model files
+    let allLibraryDirs = [modelDir, rootModelDir];
+    
+    for (const folder of workspaceFolders) {
+        const workspaceFolder = folder.uri.fsPath;
+        outputChannel.appendLine(`Setting up workspace folder: ${workspaceFolder}`);
+        
+        try {
+            // Check if the workspace has a model directory with the required files
+            const workspaceModelDir = path.join(workspaceFolder, 'model');
+            const workspaceBasicTypesFile = path.join(workspaceModelDir, 'basictypes.rosetta');
+            const workspaceAnnotationsFile = path.join(workspaceModelDir, 'annotations.rosetta');
+            
+            // Create the model directory in the workspace if it doesn't exist
+            if (!fs.existsSync(workspaceModelDir)) {
+                outputChannel.appendLine(`Creating model directory in workspace: ${workspaceModelDir}`);
+                fs.mkdirSync(workspaceModelDir, { recursive: true });
+                window.showInformationMessage(`Rosetta Language Server: Created model directory in workspace`);
+            }
+            
+            // Copy the basic types and annotations files to the workspace if they don't exist
+            if (!fs.existsSync(workspaceBasicTypesFile)) {
+                outputChannel.appendLine(`Copying basictypes.rosetta to workspace`);
+                fs.copyFileSync(basicTypesSourceFile, workspaceBasicTypesFile);
+                window.showInformationMessage(`Rosetta Language Server: Copied basic types to workspace`);
+            }
+            
+            if (!fs.existsSync(workspaceAnnotationsFile)) {
+                outputChannel.appendLine(`Copying annotations.rosetta to workspace`);
+                fs.copyFileSync(annotationsSourceFile, workspaceAnnotationsFile);
+                window.showInformationMessage(`Rosetta Language Server: Copied annotations to workspace`);
+            }
+            
+            outputChannel.appendLine(`Workspace model directory exists: ${fs.existsSync(workspaceModelDir)}`);
+            if (fs.existsSync(workspaceModelDir)) {
+                outputChannel.appendLine(`Workspace model directory contents: ${fs.readdirSync(workspaceModelDir)}`);
+            }
+            
+            // Add this workspace's model directory to library paths
+            allLibraryDirs.push(workspaceModelDir);
+        } catch (error) {
+            const message = `Error setting up workspace folder ${workspaceFolder}: ${error.message}`;
+            outputChannel.appendLine(message);
+            window.showErrorMessage(`Rosetta Language Server: ${message}`);
+        }
+    }
+    
+    // Get the primary workspace folder (first one)
+    const primaryWorkspaceFolder = workspaceFolders.length > 0 ? workspaceFolders[0].uri.fsPath : '';
+    const primaryWorkspaceModelDir = primaryWorkspaceFolder ? path.join(primaryWorkspaceFolder, 'model') : '';
+    
+    // Use the workspace model directory as the primary model directory
+    // Also set up library directories to include both the extension's model directories
+    // and all workspace model directories
+    let libraryDir = allLibraryDirs.join(path.delimiter);
+    
+    // Use absolute paths everywhere to avoid any path resolution issues
+    outputChannel.appendLine(`Starting language server with command: ${script}`);
+      let serverOptions: ServerOptions = {
+        run : { 
+            command: script, 
+            args: [
+                '-trace',                  // Enable tracing for more verbose logs
+                '-modelDir', primaryWorkspaceModelDir || modelDir,  // Use workspace model directory as primary if available
+                '-workspaceDir', primaryWorkspaceFolder || '', // Include workspace folder
+                '-libraryDir', libraryDir  // Include all model directories as libraries
+            ], 
+            options: { 
+                shell: true,
+                env: {
+                    ...process.env,
+                    // Performance environment variables
+                    ROSETTA_MAX_MEMORY: maxMemory,
+                    ROSETTA_MAX_CONCURRENT_REQUESTS: maxConcurrentRequests.toString(),
+                    ROSETTA_RESOURCE_CACHE_SIZE: resourceCacheSize.toString(),
+                    ROSETTA_MAX_FILE_SIZE: maxFileSize.toString(),
+                    ROSETTA_MAX_FILES_PER_PROJECT: maxFilesPerProject.toString(),
+                    ROSETTA_ENABLE_INCREMENTAL_BUILD: enableIncrementalBuild.toString(),
+                    ROSETTA_ENABLE_RESOURCE_CACHING: enableResourceCaching.toString(),
+                    ROSETTA_ENABLE_PARALLEL_BUILDING: enableParallelBuilding.toString(),
+                    ROSETTA_ENABLE_ASYNC_INDEXING: enableAsyncIndexing.toString(),
+                    ROSETTA_ENABLE_BATCH_PROCESSING: enableBatchProcessing.toString(),
+                    ROSETTA_BATCH_SIZE: batchSize.toString(),
+                    ROSETTA_ENABLE_LAZY_LOADING: enableLazyLoading.toString(),
+                    ROSETTA_OPTIMIZATION_PROFILE: optimizationProfile,
+                    DEBUG: 'true'
+                }
+            } 
+        },
+        debug: { 
+            command: script, 
+            args: [
+                '-trace',                  // Enable tracing for more verbose logs
+                '-modelDir', primaryWorkspaceModelDir || modelDir,  // Use workspace model directory as primary if available
+                '-workspaceDir', primaryWorkspaceFolder || '', // Include workspace folder
+                '-libraryDir', libraryDir  // Include all model directories as libraries
+            ], 
+            options: { 
+                shell: true,
+                env: {
+                    ...process.env,
+                    // Performance environment variables
+                    ROSETTA_MAX_MEMORY: maxMemory,
+                    ROSETTA_MAX_CONCURRENT_REQUESTS: maxConcurrentRequests.toString(),
+                    ROSETTA_RESOURCE_CACHE_SIZE: resourceCacheSize.toString(),
+                    ROSETTA_MAX_FILE_SIZE: maxFileSize.toString(),
+                    ROSETTA_MAX_FILES_PER_PROJECT: maxFilesPerProject.toString(),
+                    ROSETTA_ENABLE_INCREMENTAL_BUILD: enableIncrementalBuild.toString(),
+                    ROSETTA_ENABLE_RESOURCE_CACHING: enableResourceCaching.toString(),
+                    ROSETTA_ENABLE_PARALLEL_BUILDING: enableParallelBuilding.toString(),
+                    ROSETTA_ENABLE_ASYNC_INDEXING: enableAsyncIndexing.toString(),
+                    ROSETTA_ENABLE_BATCH_PROCESSING: enableBatchProcessing.toString(),
+                    ROSETTA_BATCH_SIZE: batchSize.toString(),
+                    ROSETTA_ENABLE_LAZY_LOADING: enableLazyLoading.toString(),
+                    ROSETTA_OPTIMIZATION_PROFILE: optimizationProfile,
+                    DEBUG: 'true'
+                }
+            } 
+        },
+    };
+      let clientOptions: LanguageClientOptions = {
+        documentSelector: ['rosetta'],
+        synchronize: {
+            fileEvents: enableFileWatching ? workspace.createFileSystemWatcher('**/*.*') : undefined,
+            configurationSection: 'rosetta'
+        },
+        initializationOptions: {
+            // Pass performance settings to the language server
+            maxConcurrentRequests: maxConcurrentRequests,
+            resourceCacheSize: resourceCacheSize,
+            maxFileSize: maxFileSize,
+            maxFilesPerProject: maxFilesPerProject,
+            enableIncrementalBuild: enableIncrementalBuild,
+            enableResourceCaching: enableResourceCaching,
+            enableParallelBuilding: enableParallelBuilding,
+            enableAsyncIndexing: enableAsyncIndexing,
+            enableBatchProcessing: enableBatchProcessing,
+            batchSize: batchSize,
+            enableLazyLoading: enableLazyLoading,
+            optimizationProfile: optimizationProfile,
+            excludePatterns: excludePatterns
+        },
+        outputChannel: outputChannel
+    };
+      // Create the language client and start the client.
+    lc = new LanguageClient('Rosetta Language Server', serverOptions, clientOptions);
+    
+    // Register commands with duplicate prevention
+    try {
+        const disposable2 = commands.registerCommand("rosetta.a.proxy", async () => {
+            let activeEditor = window.activeTextEditor;
+            if (!activeEditor || !activeEditor.document || activeEditor.document.languageId !== 'rosetta') {
+                return;
+            }
+
+            if (activeEditor.document.uri instanceof Uri) {
+                commands.executeCommand("rosetta.a", activeEditor.document.uri.toString());
+            }
+        });
+        context.subscriptions.push(disposable2);
+        commandDisposables.push(disposable2);
+        outputChannel.appendLine("Registered command: rosetta.a.proxy");
+    } catch (error) {
+        outputChannel.appendLine(`Warning: Command rosetta.a.proxy already exists or failed to register: ${error}`);
+    }
+    
+    // Register performance diagnostic command
+    try {
+        const disposable3 = commands.registerCommand("rosetta.performance.diagnostic", async () => {
+            const diagnosticScript = context.asAbsolutePath(path.join('src', 'rosetta', 'bin', 'rune-performance-diagnostic.bat'));
+            
+            if (fs.existsSync(diagnosticScript)) {
+                outputChannel.appendLine("Running performance diagnostic...");
+                
+                // Show the performance guide first
+                const performanceGuide = context.asAbsolutePath('PERFORMANCE_GUIDE.md');
+                if (fs.existsSync(performanceGuide)) {
+                    const doc = await workspace.openTextDocument(performanceGuide);
+                    await window.showTextDocument(doc);
+                }
+                
+                // Then run the diagnostic in terminal
+                const terminal = window.createTerminal('Rosetta Performance Diagnostic');
+                terminal.sendText(`"${diagnosticScript}"`);
+                terminal.show();
+            } else {
+                window.showErrorMessage("Performance diagnostic tool not found");
+            }
+        });
+        context.subscriptions.push(disposable3);
+        commandDisposables.push(disposable3);
+        outputChannel.appendLine("Registered command: rosetta.performance.diagnostic");
+    } catch (error) {
+        outputChannel.appendLine(`Warning: Command rosetta.performance.diagnostic already exists or failed to register: ${error}`);
+    }
+    
+    // Register command to switch optimization profile
+    try {
+        const disposable4 = commands.registerCommand('rosetta.performance.switchProfile', async () => {
+            const currentConfig = workspace.getConfiguration('rosetta');
+            const currentProfile = currentConfig.get<string>('performance.optimizationProfile', 'optimized');
+            
+            const profileOptions = [
+                { label: '📝 Standard', description: 'Basic optimization for small projects (<100 files)', value: 'standard' },
+                { label: '⚡ Optimized', description: 'Enhanced performance for medium projects (100-1000 files)', value: 'optimized' },
+                { label: '🚀 Ultra', description: 'Maximum optimization for large projects (1000+ files)', value: 'ultra' }
+            ];
+            
+            const selected = await window.showQuickPick(profileOptions, {
+                placeHolder: `Current profile: ${currentProfile}. Select a new optimization profile:`,
+                canPickMany: false
+            });
+            
+            if (selected && selected.value !== currentProfile) {
+                await currentConfig.update('performance.optimizationProfile', selected.value, true);
+                
+                window.showInformationMessage(
+                    `Optimization profile changed to ${selected.label}. Reload VS Code to apply changes.`,
+                    'Reload Now',
+                    'Later'
+                ).then(choice => {
+                    if (choice === 'Reload Now') {
+                        commands.executeCommand('workbench.action.reloadWindow');
+                    }
+                });
+            }
+        });
+        context.subscriptions.push(disposable4);
+        commandDisposables.push(disposable4);
+        outputChannel.appendLine("Registered command: rosetta.performance.switchProfile");
+    } catch (error) {
+        outputChannel.appendLine(`Warning: Command rosetta.performance.switchProfile already exists or failed to register: ${error}`);
+    }
+                'Later'
+            ).then(choice => {
+                if (choice === 'Reload Now') {
+                    commands.executeCommand('workbench.action.reloadWindow');
+                }
+            });
+        }
+    });
+    context.subscriptions.push(disposable4);
+    
+    // Register workspace folder change listener to set up new workspaces
+    context.subscriptions.push(workspace.onDidChangeWorkspaceFolders(async (event) => {
+        outputChannel.appendLine("Workspace folders changed, updating model files...");
+        
+        // Setup model files for newly added workspace folders
+        for (const folder of event.added) {
+            try {
+                const workspaceFolder = folder.uri.fsPath;
+                const workspaceModelDir = path.join(workspaceFolder, 'model');
+                const workspaceBasicTypesFile = path.join(workspaceModelDir, 'basictypes.rosetta');
+                const workspaceAnnotationsFile = path.join(workspaceModelDir, 'annotations.rosetta');
+                
+                if (!fs.existsSync(workspaceModelDir)) {
+                    fs.mkdirSync(workspaceModelDir, { recursive: true });
+                }
+                
+                if (!fs.existsSync(workspaceBasicTypesFile)) {
+                    fs.copyFileSync(basicTypesSourceFile, workspaceBasicTypesFile);
+                }
+                
+                if (!fs.existsSync(workspaceAnnotationsFile)) {
+                    fs.copyFileSync(annotationsSourceFile, workspaceAnnotationsFile);
+                }
+                
+                window.showInformationMessage(`Rosetta Language Server: Set up model files for new workspace folder`);
+            } catch (error) {
+                const message = `Error setting up new workspace folder: ${error.message}`;
+                outputChannel.appendLine(message);
+                window.showErrorMessage(`Rosetta Language Server: ${message}`);
+            }
+        }
+        
+        // Restart the language server to pick up the new workspace folders
+        if (event.added.length > 0 || event.removed.length > 0) {
+            outputChannel.appendLine("Restarting language server to pick up workspace changes...");
+            await lc.stop();
+            await activate(context);
+        }    }));
+      // enable tracing (.Off, .Messages, Verbose)
+    lc.setTrace(Trace.Verbose);
+    outputChannel.appendLine("Launching Rosetta Language Server...");    await lc.start().then(() => {
+        outputChannel.appendLine("Rosetta Language Server started.");
+        window.showInformationMessage("Rosetta Language Server started with automatic basic types.");
+        isActivated = true;
+    }).catch((err) => {
+        outputChannel.appendLine("Failed to launch Rosetta Language Server.");
+        outputChannel.appendLine(err.toString());
+        window.showErrorMessage("Failed to launch Rosetta Language Server. See output channel for details.");
+        throw err;
+    });
+    
+    } catch (error) {
+        outputChannel?.appendLine(`Error during activation: ${error}`);
+        isActivated = false;
+        throw error;
+    }
+}
+
+export function deactivate() {
+    outputChannel.appendLine("Stopping Rosetta Language Server...");
+    return lc.stop();
+}
+
+function createDebugEnv() {
+    return Object.assign({
+        JAVA_OPTS:"-Xdebug -Xrunjdwp:server=y,transport=dt_socket,address=8000,suspend=n,quiet=y"
+    }, process.env)
+}
